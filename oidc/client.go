@@ -192,6 +192,35 @@ func (c *Client) VerifyIDToken(idToken string) error {
 	return ErrInvalidToken
 }
 
+type UserInfo struct {
+	Subject       string `json:"sub"`
+	Name          string `json:"name"`
+	Email         string `json:"email"`
+	EmailVerified bool   `json:"email_verified"`
+}
+
+func (c *Client) FetchUserInfo(userID, accessToken string) (UserInfo, error) {
+	req, err := http.NewRequest(http.MethodGet, c.oidConfig.UserInfoEndpoint, nil)
+	if err != nil {
+		return UserInfo{}, fmt.Errorf("fetch user info: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return UserInfo{}, fmt.Errorf("fetch user info: %w", err)
+	}
+	defer resp.Body.Close()
+	var info UserInfo
+	err = json.NewDecoder(resp.Body).Decode(&info)
+	if err != nil {
+		return UserInfo{}, fmt.Errorf("decode user info: %w", err)
+	}
+	if info.Subject != userID {
+		return UserInfo{}, errors.New("fetch user info: user ID does not match requested user ID")
+	}
+	return info, nil
+}
+
 func ParseJWT(token string) (jwt.Token, error) {
 	t, err := jwt.ParseString(token, jwt.WithValidate(false), jwt.WithVerify(false))
 	if err != nil {
