@@ -1,5 +1,6 @@
 # oidc-client
 
+An [OpenID Connect](https://openid.net/connect/) client library for [Go](https://go.dev).
 
 ## License
 
