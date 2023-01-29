@@ -106,23 +106,23 @@ func (c *Client) InitiateAuthFlow(w http.ResponseWriter, r *http.Request, scopes
 	http.Redirect(w, r, c.oidConfig.AuthorizationEndpoint+"?"+params.Encode(), http.StatusSeeOther)
 }
 
-func (c *Client) FinishAuthFlow(w http.ResponseWriter, r *http.Request) (access string, refresh string, id string, err error) {
+func (c *Client) FinishAuthFlow(w http.ResponseWriter, r *http.Request) (userID, access, refresh, id string, err error) {
 	query := r.URL.Query()
 
 	state := query.Get("state")
 	if _, ok := c.pendingStates[state]; !ok {
-		return "", "", "", fmt.Errorf("auth flow failed: %w", ErrInvalidState)
+		return "", "", "", "", fmt.Errorf("auth flow failed: %w", ErrInvalidState)
 	}
 	delete(c.pendingStates, state)
 
 	error := query.Get("error")
 	if error != "" {
-		return "", "", "", fmt.Errorf("auth flow failed: %w", errors.New(error))
+		return "", "", "", "", fmt.Errorf("auth flow failed: %w", errors.New(error))
 	}
 
 	code := query.Get("code")
 	if code == "" {
-		return "", "", "", fmt.Errorf("auth flow failed: missing code query parameter")
+		return "", "", "", "", fmt.Errorf("auth flow failed: missing code query parameter")
 	}
 
 	params := url.Values{}
@@ -132,7 +132,7 @@ func (c *Client) FinishAuthFlow(w http.ResponseWriter, r *http.Request) (access 
 	return c.tokenRequest(params)
 }
 
-func (c *Client) RefreshTokens(refreshToken string) (access string, refresh string, id string, err error) {
+func (c *Client) RefreshTokens(refreshToken string) (userID, access, refresh, id string, err error) {
 	params := url.Values{}
 	params.Set("grant_type", "refresh_token")
 	params.Set("refresh_token", refreshToken)
@@ -140,16 +140,16 @@ func (c *Client) RefreshTokens(refreshToken string) (access string, refresh stri
 	return c.tokenRequest(params)
 }
 
-func (c *Client) tokenRequest(params url.Values) (access string, refresh string, id string, err error) {
+func (c *Client) tokenRequest(params url.Values) (userID, access, refresh, id string, err error) {
 	req, err := http.NewRequest(http.MethodPost, c.oidConfig.TokenEndpoint, bytes.NewBufferString(params.Encode()))
 	if err != nil {
-		return "", "", "", fmt.Errorf("refresh request: %w", err)
+		return "", "", "", "", fmt.Errorf("refresh request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetBasicAuth(url.QueryEscape(c.config.ClientID), url.QueryEscape(c.config.ClientSecret))
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return "", "", "", fmt.Errorf("refresh request: %w", err)
+		return "", "", "", "", fmt.Errorf("refresh request: %w", err)
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
@@ -159,9 +159,9 @@ func (c *Client) tokenRequest(params url.Values) (access string, refresh string,
 		var data response
 		json.NewDecoder(res.Body).Decode(&data)
 		if data.Error == "" {
-			return "", "", "", fmt.Errorf("refresh request failed with status code %d", res.StatusCode)
+			return "", "", "", "", fmt.Errorf("refresh request failed with status code %d", res.StatusCode)
 		}
-		return "", "", "", fmt.Errorf("refresh request: %w", errors.New(data.Error))
+		return "", "", "", "", fmt.Errorf("refresh request: %w", errors.New(data.Error))
 	}
 	type response struct {
 		TokenType    string `json:"token_type"`
@@ -172,28 +172,29 @@ func (c *Client) tokenRequest(params url.Values) (access string, refresh string,
 	var data response
 	err = json.NewDecoder(res.Body).Decode(&data)
 	if err != nil {
-		return "", "", "", fmt.Errorf("decode token request response: %w", err)
+		return "", "", "", "", fmt.Errorf("decode token request response: %w", err)
 	}
 	if strings.ToLower(data.TokenType) != "bearer" {
-		return "", "", "", fmt.Errorf("token request: unsupported token type")
+		return "", "", "", "", fmt.Errorf("token request: unsupported token type")
 	}
 
-	if err = c.VerifyIDToken(data.IDToken); err != nil {
-		return "", "", "", fmt.Errorf("token request: %w", err)
+	idToken, err := c.VerifyIDToken(data.IDToken)
+	if err != nil {
+		return "", "", "", "", fmt.Errorf("token request: %w", err)
 	}
 
-	return data.AccessToken, data.RefreshToken, data.IDToken, nil
+	return idToken.Subject(), data.AccessToken, data.RefreshToken, data.IDToken, nil
 }
 
-func (c *Client) VerifyIDToken(idToken string) error {
+func (c *Client) VerifyIDToken(idToken string) (jwt.Token, error) {
 	refreshed := false
 	for {
-		_, err := jwt.ParseString(idToken, jwt.WithKeySet(c.jwkSet, jws.WithRequireKid(false)), jwt.WithValidate(true), jwt.WithAcceptableSkew(1*time.Minute), jwt.WithIssuer(c.providerURL), jwt.WithAudience(c.config.ClientID))
+		token, err := jwt.ParseString(idToken, jwt.WithKeySet(c.jwkSet, jws.WithRequireKid(false)), jwt.WithValidate(true), jwt.WithAcceptableSkew(1*time.Minute), jwt.WithIssuer(c.providerURL), jwt.WithAudience(c.config.ClientID))
 		if err == nil {
-			return nil
+			return token, nil
 		}
 		if errors.Is(err, jwt.ErrTokenExpired()) {
-			return ErrExpiredToken
+			return nil, ErrExpiredToken
 		}
 		if jwt.IsValidationError(err) || refreshed {
 			break
@@ -201,7 +202,7 @@ func (c *Client) VerifyIDToken(idToken string) error {
 		c.jwkCache.Refresh(context.Background(), c.oidConfig.JWKsURI)
 		refreshed = true
 	}
-	return ErrInvalidToken
+	return nil, ErrInvalidToken
 }
 
 type UserInfo struct {
