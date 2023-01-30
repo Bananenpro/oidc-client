@@ -24,7 +24,7 @@ type Client struct {
 	config      ClientConfig
 	oidConfig   oidConfig
 
-	pendingStates map[string]struct{}
+	pendingStates map[string]any
 	pendingNonces map[string]struct{}
 
 	jwkCache *jwk.Cache
@@ -60,7 +60,7 @@ func NewClient(providerURL string, config ClientConfig) (*Client, error) {
 	client := &Client{
 		providerURL:   strings.TrimSuffix(providerURL, "/"),
 		config:        config,
-		pendingStates: make(map[string]struct{}),
+		pendingStates: make(map[string]any),
 		pendingNonces: make(map[string]struct{}),
 	}
 
@@ -84,9 +84,13 @@ func NewClient(providerURL string, config ClientConfig) (*Client, error) {
 }
 
 func (c *Client) InitiateAuthFlow(w http.ResponseWriter, r *http.Request, scopes []string) {
+	c.InitiateAuthFlowWithData(w, r, scopes, nil)
+}
+
+func (c *Client) InitiateAuthFlowWithData(w http.ResponseWriter, r *http.Request, scopes []string, data any) {
 	state := generateToken(10)
 	nonce := generateToken(10)
-	c.pendingStates[state] = struct{}{}
+	c.pendingStates[state] = data
 	c.pendingNonces[nonce] = struct{}{}
 	go func() {
 		time.Sleep(10 * time.Minute)
@@ -107,29 +111,37 @@ func (c *Client) InitiateAuthFlow(w http.ResponseWriter, r *http.Request, scopes
 }
 
 func (c *Client) FinishAuthFlow(w http.ResponseWriter, r *http.Request) (userID, access, refresh, id string, err error) {
+	userID, access, refresh, id, _, err = c.FinishAuthFlowWithData(w, r)
+	return userID, access, refresh, id, err
+}
+
+func (c *Client) FinishAuthFlowWithData(w http.ResponseWriter, r *http.Request) (userID, access, refresh, id string, data any, err error) {
 	query := r.URL.Query()
 
 	state := query.Get("state")
-	if _, ok := c.pendingStates[state]; !ok {
-		return "", "", "", "", fmt.Errorf("auth flow failed: %w", ErrInvalidState)
+	if d, ok := c.pendingStates[state]; !ok {
+		return "", "", "", "", nil, fmt.Errorf("auth flow failed: %w", ErrInvalidState)
+	} else {
+		data = d
 	}
 	delete(c.pendingStates, state)
 
 	error := query.Get("error")
 	if error != "" {
-		return "", "", "", "", fmt.Errorf("auth flow failed: %w", errors.New(error))
+		return "", "", "", "", nil, fmt.Errorf("auth flow failed: %w", errors.New(error))
 	}
 
 	code := query.Get("code")
 	if code == "" {
-		return "", "", "", "", fmt.Errorf("auth flow failed: missing code query parameter")
+		return "", "", "", "", nil, fmt.Errorf("auth flow failed: missing code query parameter")
 	}
 
 	params := url.Values{}
 	params.Set("grant_type", "authorization_code")
 	params.Set("code", code)
 	params.Set("redirect_uri", c.config.RedirectURI)
-	return c.tokenRequest(params)
+	userID, access, refresh, id, err = c.tokenRequest(params)
+	return userID, access, refresh, id, data, err
 }
 
 func (c *Client) RefreshTokens(refreshToken string) (userID, access, refresh, id string, err error) {
