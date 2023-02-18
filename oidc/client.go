@@ -29,6 +29,8 @@ type Client struct {
 
 	jwkCache *jwk.Cache
 	jwkSet   jwk.Set
+
+	forcePrompt bool
 }
 
 type ClientConfig struct {
@@ -106,6 +108,10 @@ func (c *Client) InitiateAuthFlowWithData(w http.ResponseWriter, r *http.Request
 	params.Set("response_mode", "query")
 	params.Set("state", state)
 	params.Set("nonce", nonce)
+	params.Set("access_type", "offline")
+	if c.forcePrompt {
+		params.Set("prompt", "consent")
+	}
 
 	http.Redirect(w, r, c.oidConfig.AuthorizationEndpoint+"?"+params.Encode(), http.StatusSeeOther)
 }
@@ -155,7 +161,7 @@ func (c *Client) RefreshTokens(refreshToken string) (userID, access, refresh, id
 func (c *Client) tokenRequest(params url.Values) (userID, access, refresh, id string, err error) {
 	req, err := http.NewRequest(http.MethodPost, c.oidConfig.TokenEndpoint, bytes.NewBufferString(params.Encode()))
 	if err != nil {
-		return "", "", "", "", fmt.Errorf("refresh request: %w", err)
+		return "", "", "", "", fmt.Errorf("token request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetBasicAuth(url.QueryEscape(c.config.ClientID), url.QueryEscape(c.config.ClientSecret))
@@ -171,9 +177,10 @@ func (c *Client) tokenRequest(params url.Values) (userID, access, refresh, id st
 		var data response
 		json.NewDecoder(res.Body).Decode(&data)
 		if data.Error == "" {
-			return "", "", "", "", fmt.Errorf("refresh request failed with status code %d", res.StatusCode)
+			return "", "", "", "", fmt.Errorf("token request failed with status code %d", res.StatusCode)
 		}
-		return "", "", "", "", fmt.Errorf("refresh request: %w", errors.New(data.Error))
+		c.forcePrompt = true
+		return "", "", "", "", fmt.Errorf("token request: %w", errors.New(data.Error))
 	}
 	type response struct {
 		TokenType    string `json:"token_type"`
@@ -194,6 +201,8 @@ func (c *Client) tokenRequest(params url.Values) (userID, access, refresh, id st
 	if err != nil {
 		return "", "", "", "", fmt.Errorf("token request: %w", err)
 	}
+
+	c.forcePrompt = false
 
 	return idToken.Subject(), data.AccessToken, data.RefreshToken, data.IDToken, nil
 }
