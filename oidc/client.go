@@ -220,6 +220,7 @@ func (c *Client) VerifyIDToken(idToken string) (jwt.Token, error) {
 type UserInfo struct {
 	Subject       string `json:"sub"`
 	Name          string `json:"name"`
+	Picture       string `json:"picture"`
 	Email         string `json:"email"`
 	EmailVerified bool   `json:"email_verified"`
 }
@@ -242,6 +243,9 @@ func (c *Client) FetchUserInfo(userID, accessToken string) (UserInfo, error) {
 	}
 	if info.Subject != userID {
 		return UserInfo{}, errors.New("fetch user info: user ID does not match requested user ID")
+	}
+	if strings.Contains(info.Picture, "googleusercontent.com") {
+		info.Picture = strings.Split(info.Picture, "=")[0]
 	}
 	return info, nil
 }
