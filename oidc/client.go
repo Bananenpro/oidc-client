@@ -88,8 +88,8 @@ func (c *Client) InitiateAuthFlow(w http.ResponseWriter, r *http.Request, scopes
 }
 
 func (c *Client) InitiateAuthFlowWithData(w http.ResponseWriter, r *http.Request, scopes []string, data any) {
-	state := generateToken(10)
-	nonce := generateToken(10)
+	state := generateToken(32)
+	nonce := generateToken(32)
 	c.pendingStates[state] = data
 	c.pendingNonces[nonce] = struct{}{}
 	go func() {
