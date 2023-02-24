@@ -1,4 +1,4 @@
-module github.com/Bananenpro/oidc-client
+module github.com/juho05/oidc-client
 
 go 1.19
 
