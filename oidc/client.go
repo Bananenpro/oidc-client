@@ -210,7 +210,7 @@ func (c *Client) tokenRequest(params url.Values) (userID, access, refresh, id st
 func (c *Client) VerifyIDToken(idToken string) (jwt.Token, error) {
 	refreshed := false
 	for {
-		token, err := jwt.ParseString(idToken, jwt.WithKeySet(c.jwkSet, jws.WithRequireKid(false)), jwt.WithValidate(true), jwt.WithAcceptableSkew(1*time.Minute), jwt.WithIssuer(c.providerURL), jwt.WithAudience(c.config.ClientID))
+		token, err := jwt.ParseString(idToken, jwt.WithKeySet(c.jwkSet, jws.WithRequireKid(false)), jwt.WithValidate(true), jwt.WithAcceptableSkew(1*time.Minute), jwt.WithIssuer(c.oidConfig.Issuer), jwt.WithAudience(c.config.ClientID))
 		if err == nil {
 			return token, nil
 		}
@@ -283,18 +283,11 @@ func (c *Client) fetchOpenIDConfig() error {
 		return fmt.Errorf("decode OpenID configuration: %w", err)
 	}
 
-	if config.Issuer != c.providerURL {
-		return fmt.Errorf("issuer in OpenID configuration does not match provider URL")
-	}
-
 	c.oidConfig = config
 	return nil
 }
 
 func (c *Client) verifyOpenIDConfig() error {
-	if c.oidConfig.Issuer != c.providerURL {
-		return errors.New("issuer does not match providerURL")
-	}
 	if c.oidConfig.AuthorizationEndpoint == "" {
 		return errors.New("empty authorization endpoint")
 	}
