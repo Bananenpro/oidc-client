@@ -10,7 +10,6 @@ import (
 	"math/big"
 	"net/http"
 	"net/url"
-	"path"
 	"strings"
 	"time"
 
@@ -59,7 +58,7 @@ type oidConfig struct {
 	ServiceDocumentation string `json:"service_documentation"`
 }
 
-func NewClient(providerURL string, useProviderURLForInternalRequests bool, config ClientConfig) (*Client, error) {
+func NewClient(providerURL string, config ClientConfig) (*Client, error) {
 	client := &Client{
 		providerURL:   strings.TrimSuffix(providerURL, "/"),
 		config:        config,
@@ -67,7 +66,7 @@ func NewClient(providerURL string, useProviderURLForInternalRequests bool, confi
 		pendingNonces: make(map[string]struct{}),
 	}
 
-	if err := client.fetchOpenIDConfig(useProviderURLForInternalRequests); err != nil {
+	if err := client.fetchOpenIDConfig(); err != nil {
 		return nil, fmt.Errorf("new client: %w", err)
 	}
 
@@ -268,7 +267,7 @@ func ParseJWT(token string) (jwt.Token, error) {
 	return t, nil
 }
 
-func (c *Client) fetchOpenIDConfig(useProviderURLForInternalRequests bool) error {
+func (c *Client) fetchOpenIDConfig() error {
 	res, err := http.Get(c.providerURL + "/.well-known/openid-configuration")
 	if err != nil {
 		return fmt.Errorf("fetch OpenID configuration: %w", err)
@@ -282,12 +281,6 @@ func (c *Client) fetchOpenIDConfig(useProviderURLForInternalRequests bool) error
 	err = json.NewDecoder(res.Body).Decode(&config)
 	if err != nil {
 		return fmt.Errorf("decode OpenID configuration: %w", err)
-	}
-
-	if useProviderURLForInternalRequests {
-		config.JWKsURI = path.Join(c.providerURL, strings.TrimPrefix(config.JWKsURI, config.Issuer))
-		config.TokenEndpoint = path.Join(c.providerURL, strings.TrimPrefix(config.TokenEndpoint, config.Issuer))
-		config.UserInfoEndpoint = path.Join(c.providerURL, strings.TrimPrefix(config.UserInfoEndpoint, config.Issuer))
 	}
 
 	c.oidConfig = config
